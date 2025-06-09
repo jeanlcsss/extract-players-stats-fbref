@@ -6,6 +6,7 @@ import time
 import os
 import logging
 import sys
+from functools import reduce
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -154,7 +155,7 @@ def scrap_player_stats(driver, url, stat_category):
     df.to_excel(f'jogadores/stats_{stat_category}_players.xlsx', index=False)
     logging.info(f'Arquivo {stat_category}_jogadores.xlsx salvo com sucesso!')
 
-def concatenate_excel_files(folder_path, output_file):
+def concatenate_excel_files_per_sheet(folder_path, output_file):
     files = [f for f in os.listdir(folder_path) if f.endswith('.xlsx')]
     if not files:
         raise FileNotFoundError(f'No Excel files found in {folder_path}')
@@ -178,6 +179,37 @@ def concatenate_excel_files(folder_path, output_file):
                 logging.error(f'Error concatenating {f}: {e}')
                 raise
 
+def full_merge_data(folder_path, output_file, merge_keys):
+    files = [f for f in os.listdir(folder_path) if f.endswith('.xlsx')]
+    if not files:
+        raise FileNotFoundError(f'No Excel files found in {folder_path}')
+    
+    df_list = []
+    for f in files:
+        file_path = os.path.join(folder_path, f)
+        try:
+            df = pd.read_excel(file_path)
+            if df.empty:
+                print(f'Warning: {file_path} is empty. Skipping.')
+                continue
+            df_list.append(df)
+            print(f'Arquivo {f} lido com sucesso!')
+        except Exception as e:
+            print(f'Error reading {f}: {e}')
+            continue
+
+    def merge_dfs(left, right):
+        merged = pd.merge(left, right, on=merge_keys, how='outer', suffixes=('', '_dup'))
+        for col in merged.columns:
+            if col.endswith('_dup'):
+                base_col = col.replace('_dup', '')
+                merged[base_col] = merged[base_col].combine_first(merged[col]) 
+                merged.drop(columns=[col], inplace=True)
+        return merged
+
+    merged_df = reduce(merge_dfs, df_list)
+    merged_df.to_excel(output_file, index=False)
+    logging.info(f'Arquivo {f} concatenado com sucesso!')
         
 
 
@@ -206,5 +238,6 @@ for stat_category, url in urls.items():
 
 quit_driver(driver)
 
-concatenate_excel_files('jogadores', 'jogadores/all_stats_jogadores.xlsx')
+full_merge_data('jogadores', 'jogadores/all_stats_jogadores.xlsx',
+                 merge_keys=['player', 'nationality', 'position', 'team', 'comp_level', 'age', 'birth_year', 'minutes_90s'])
 # concatenate_excel_files('times', 'times/all_stats_times.xlsx')
